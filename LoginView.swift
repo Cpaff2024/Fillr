@@ -27,7 +27,8 @@ struct LoginView: View {
                             .font(.system(size: 70))
                             .foregroundColor(.blue)
                         
-                        Text("WaterRefill")
+                        // --- NAME CHANGE HERE ---
+                        Text("Fillr")
                             .font(.largeTitle)
                             .fontWeight(.bold)
                         
