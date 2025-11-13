@@ -6,6 +6,7 @@ struct AddStationView: View {
     // Environment
     @EnvironmentObject var locationManager: LocationManager
     @EnvironmentObject var authManager: AuthManager // Need for user ID when saving draft/station
+    @EnvironmentObject var toastManager: ToastManager // NEW: Inject Toast Manager
     @Environment(\.dismiss) private var dismiss
 
     // Input Parameters & Callbacks
@@ -39,8 +40,8 @@ struct AddStationView: View {
 
     // Saving Process State
     @State private var isSaving = false // Disables form during save
-    @State private var showingSaveErrorAlert = false
-    @State private var saveErrorMessage = ""
+    // REMOVED: @State private var showingSaveErrorAlert = false
+    // REMOVED: @State private var saveErrorMessage = ""
 
     // --- NEW: Define location types allowed for user addition ---
     private let userAddableLocationTypes: [RefillStation.LocationType] = [
@@ -177,10 +178,8 @@ struct AddStationView: View {
                 }
                 .onChange(of: selectedItems) { _, newItems in loadImagesFromPicker(from: newItems) }
                 .disabled(isSaving)
-                .alert("Error", isPresented: $showingSaveErrorAlert) {
-                    Button("OK") { }
-                } message: { Text(saveErrorMessage) }
-
+                // REMOVED: .alert(logic) as toast is used for user feedback
+                
                 // Saving overlay
                 if isSaving {
                     Color.black.opacity(0.4).ignoresSafeArea()
@@ -232,21 +231,28 @@ struct AddStationView: View {
     private func handleSaveAction() {
         isSaving = true
         guard let userId = authManager.currentUser?.id else {
-             showError("You must be logged in to save."); return
+             // UPDATED to use ToastManager
+             toastManager.show(message: "You must be logged in to save.", isError: true)
+             isSaving = false
+             return
         }
 
         if isHereNow {
             // --- FINAL SUBMISSION (ALWAYS USER TYPE) ---
-            guard let coord = currentCoordinate else {
-                showError("Could not get current location."); return
+            guard currentCoordinate != nil else {
+                // UPDATED to use ToastManager
+                showError("Could not get current location.")
+                return
             }
             guard !selectedImages.isEmpty else {
-                showError("Please add at least one photo."); return
+                // UPDATED to use ToastManager
+                showError("Please add at least one photo.")
+                return
             }
 
             let finalStation = RefillStation(
                 id: stationId,
-                coordinate: coord,
+                coordinate: currentCoordinate, // Use currentCoordinate directly
                 name: name, description: description,
                 locationType: locationType, // Uses the selected user-addable type
                 cost: cost, limitations: limitations,
@@ -277,14 +283,15 @@ struct AddStationView: View {
             print("DEBUG: AddStationView saving USER draft \(draftStation.id)")
             DraftStorageManager.shared.saveDraft(draftStation)
             isSaving = false
+            // UPDATED to use ToastManager
+            toastManager.show(message: "Draft saved locally.", isError: false)
             dismiss() // Dismiss after saving draft locally
         }
     }
 
-    // (Keep showError, removeImage, loadImagesFromPicker functions as they were)
+    // UPDATED: Simple wrapper to use ToastManager
     private func showError(_ message: String) {
-         saveErrorMessage = message
-         showingSaveErrorAlert = true
+         toastManager.show(message: message, isError: true)
          isSaving = false
      }
 
@@ -446,4 +453,5 @@ struct AddStationView: View {
      )
      .environmentObject(LocationManager())
      .environmentObject(AuthManager.shared)
+     .environmentObject(ToastManager.shared) // Inject ToastManager to Preview
 }

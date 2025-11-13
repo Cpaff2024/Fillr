@@ -7,13 +7,14 @@ struct WriteReviewView: View {
     
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var authManager: AuthManager
+    @EnvironmentObject var toastManager: ToastManager // NEW: Inject Toast Manager
     
     @State private var rating: Int
     @State private var comment: String
     @State private var isSubmitting = false
-    @State private var errorMessage: String?
-    @State private var showingError = false
-    
+    // REMOVED: @State private var errorMessage: String?
+    // REMOVED: @State private var showingError = false
+
     // Initialize with either a review to edit or default values
     init(stationId: String, reviewToEdit: StationReview?, onSave: @escaping (StationReview) -> Void) {
         self.stationId = stationId
@@ -122,13 +123,7 @@ struct WriteReviewView: View {
                     }
                 }
             )
-            .alert(isPresented: $showingError) {
-                Alert(
-                    title: Text("Error"),
-                    message: Text(errorMessage ?? "An unknown error occurred"),
-                    dismissButton: .default(Text("OK"))
-                )
-            }
+            // REMOVED: .alert modifier
         }
     }
     
@@ -157,8 +152,8 @@ struct WriteReviewView: View {
     // Submit the review (create new or update existing)
     private func submitReview() {
         guard let user = authManager.currentUser, isValid else {
-            errorMessage = "Please complete your review before submitting"
-            showingError = true
+            // UPDATED: Use ToastManager
+            toastManager.show(message: "Please complete your review before submitting.", isError: true)
             return
         }
         
@@ -200,7 +195,8 @@ struct WriteReviewView_Previews: PreviewProvider {
                 onSave: { _ in }
             )
             .environmentObject(authManager)
-            
+            .environmentObject(ToastManager.shared) // Inject ToastManager
+
             // Preview for editing an existing review
             WriteReviewView(
                 stationId: "previewStationId",
@@ -222,6 +218,7 @@ struct WriteReviewView_Previews: PreviewProvider {
                 onSave: { _ in }
             )
             .environmentObject(authManager)
+            .environmentObject(ToastManager.shared) // Inject ToastManager
         }
     }
 }

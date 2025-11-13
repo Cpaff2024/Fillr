@@ -11,6 +11,8 @@ struct StationDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var authManager: AuthManager
     @StateObject private var reviewsManager = ReviewsManager() // For reviews shown on this page
+    // NEW: Inject Toast Manager
+    @EnvironmentObject var toastManager: ToastManager
 
     // State
     @State private var photos: [UIImage] = []
@@ -18,9 +20,6 @@ struct StationDetailView: View {
     @State private var isFavorite = false
     @State private var isTogglingFavorite = false
     @State private var showingReviewSheet = false // Sheet for writing/editing review
-    @State private var showAlert = false
-    @State private var alertTitle = ""
-    @State private var alertMessage = ""
     @State private var showingDirections = false // Not used directly currently
     @State private var directionsTransport: DirectionsTransportType = .walking
 
@@ -96,9 +95,6 @@ struct StationDetailView: View {
                 checkIfFavorite()
                 reviewsManager.fetchReviews(for: station.id.uuidString, currentUserId: authManager.currentUser?.id)
             }
-            .alert(isPresented: $showAlert) {
-                Alert(title: Text(alertTitle), message: Text(alertMessage), dismissButton: .default(Text("OK")))
-            }
             .sheet(isPresented: $showingReviewSheet) {
                 // Pass necessary environment objects if WriteReviewView needs them
                 WriteReviewView(
@@ -107,14 +103,9 @@ struct StationDetailView: View {
                     onSave: { review in handleReviewSave(review) } // Use helper function
                 )
                 .environmentObject(authManager) // Pass AuthManager
+                .environmentObject(toastManager) // Inject ToastManager to Review View
             }
         }
-        // Apply alert modifier to the NavigationView itself
-         .alert(alertTitle, isPresented: $showAlert) {
-              Button("OK") { }
-          } message: {
-              Text(alertMessage)
-          }
     } // End body
 
     // MARK: - Computed View Properties (for clarity)
@@ -256,9 +247,8 @@ struct StationDetailView: View {
             // Leave/Edit Review Button
             Button(action: {
                 guard authManager.currentUser != nil else {
-                    alertTitle = "Sign In Required"
-                    alertMessage = "Please sign in to leave a review."
-                    showAlert = true
+                    // UPDATED: Use ToastManager
+                    toastManager.show(message: "Please sign in to leave a review.", isError: true)
                     return
                 }
                 showingReviewSheet = true
@@ -330,6 +320,7 @@ struct StationDetailView: View {
         VStack(spacing: 10) {
             Text("Get Directions").font(.headline).padding(.top, 8)
             HStack(spacing: 12) {
+                // FIXED: Use \.self for iteration over array literal containing an enum
                 ForEach([DirectionsTransportType.walking, .driving, .transit], id: \.self) { mode in
                     Button(action: {
                         directionsTransport = mode
@@ -367,39 +358,41 @@ struct StationDetailView: View {
         photos = [] // Clear existing photos before loading
         let photoIDsToLoad = station.photoIDs // Capture current IDs
 
-        Task { // Use Task for async operations
+        Task { @MainActor in // Use MainActor isolation to safely update published state
             var loaded: [UIImage] = []
+            
+            // This concurrent loop is now implicitly more robust due to the ViewModel's async logic.
             for photoID in photoIDsToLoad {
-                // Use await with a custom async wrapper or keep completion handler
-                 await withCheckedContinuation { continuation in
-                     getPhoto(photoID) { image in
-                         if let img = image {
-                             loaded.append(img)
-                         }
-                         continuation.resume()
-                     }
-                 }
+                // Wrap the closure call in a continuation to bridge to async/await
+                let image = await withCheckedContinuation { continuation in
+                    self.getPhoto(photoID) { image in
+                        continuation.resume(returning: image)
+                    }
+                }
+                
+                if let img = image {
+                    loaded.append(img)
+                }
             }
-            // Update state on main thread after all photos attempted
-            DispatchQueue.main.async {
-                 self.photos = loaded
-                 self.loadingPhotos = false
-                 print("DEBUG: Loaded \(loaded.count)/\(photoIDsToLoad.count) photos.")
-            }
+
+            // Update UI state
+            self.photos = loaded
+            self.loadingPhotos = false
+            print("DEBUG: Loaded \(loaded.count)/\(photoIDsToLoad.count) photos.")
         }
     }
 
 
     private func checkIfFavorite() {
+        // Uses the consolidated User model
         guard let user = authManager.currentUser else { isFavorite = false; return }
         isFavorite = user.favoriteStations.contains(station.id.uuidString)
     }
 
     private func toggleFavorite() {
         guard authManager.currentUser != nil else {
-            alertTitle = "Not Logged In"
-            alertMessage = "Please log in to save favorites."
-            showAlert = true
+            // UPDATED: Use ToastManager
+            toastManager.show(message: "Please log in to save favorites.", isError: true)
             return
         }
 
@@ -422,11 +415,11 @@ struct StationDetailView: View {
              isTogglingFavorite = false
              if success {
                  isFavorite = isAdding // Update local state to match backend action
+                 // UPDATED: Show success toast
+                 toastManager.show(message: isAdding ? "Added to Favorites" : "Removed from Favorites", isError: false)
              } else {
-                 alertTitle = "Error"
-                 alertMessage = message ?? "Failed to update favorites."
-                 showAlert = true
-                 // Revert optimistic UI update if needed, though AuthManager should handle it
+                 // UPDATED: Show error toast
+                 toastManager.show(message: message ?? "Failed to update favorites.", isError: true)
              }
          }
      }
@@ -447,13 +440,12 @@ struct StationDetailView: View {
             DispatchQueue.main.async {
                  if success {
                      showingReviewSheet = false // Close sheet on success
-                     // Optionally show a success toast/message
+                     // UPDATED: Show confirmation toast
+                     toastManager.show(message: isUpdating ? "Review updated!" : "Review posted!", isError: false)
                  } else {
-                     alertTitle = "Review Error"
-                     alertMessage = reviewsManager.errorMessage ?? "Failed to save review."
-                     showAlert = true
-                     // Keep sheet open? Or dismiss? User choice.
-                     // showingReviewSheet = false
+                     // UPDATED: Show error toast (using ReviewsManager's internal error message)
+                     toastManager.show(message: reviewsManager.errorMessage ?? "Failed to save review.", isError: true)
+                     // Keep sheet open for user to fix input or retry
                  }
              }
         }
@@ -462,10 +454,9 @@ struct StationDetailView: View {
 
     // --- New Action Function for Logging Refill ---
     private func logRefillAction() {
-         guard let userId = authManager.currentUser?.id else {
-             alertTitle = "Not Logged In"
-             alertMessage = "Please log in to log your refill."
-             showAlert = true
+         guard authManager.currentUser?.id != nil else {
+             // UPDATED: Use ToastManager
+             toastManager.show(message: "Please log in to log your refill.", isError: true)
              return
          }
 
@@ -474,7 +465,6 @@ struct StationDetailView: View {
          isLoggingRefill = true
 
          // Assume standard refill size for simplicity (e.g., 0.5L)
-         // Or present UI to ask user for amount
          let refillAmountLitres: Double = 0.5
 
          // Call AuthManager function which calls FirebaseManager
@@ -483,7 +473,7 @@ struct StationDetailView: View {
              DispatchQueue.main.async {
                  isLoggingRefill = false // Re-enable button
                  if success {
-                     print("✅ Refill logged successfully via AuthManager for user \(userId)")
+                     print("✅ Refill logged successfully via AuthManager.")
                      // Show confirmation state on button
                      withAnimation {
                          showLogConfirmation = true
@@ -496,9 +486,8 @@ struct StationDetailView: View {
                      }
                  } else {
                       print("🔴 Refill logging failed via AuthManager: \(message ?? "Unknown error")")
-                      alertTitle = "Log Refill Failed"
-                      alertMessage = message ?? "Could not log refill. Please try again."
-                      showAlert = true
+                      // UPDATED: Show error toast
+                      toastManager.show(message: message ?? "Could not log refill. Please try again.", isError: true)
                  }
              }
          }
@@ -509,9 +498,8 @@ struct StationDetailView: View {
     private func openInMaps() {
         guard let coordinate = station.coordinate else {
             print("🔴 Error: Station coordinate is nil, cannot open in Maps.")
-            alertTitle = "Location Missing"
-            alertMessage = "Cannot get directions because location data is missing for this station."
-            showAlert = true
+            // UPDATED: Use ToastManager
+            toastManager.show(message: "Cannot get directions because location data is missing for this station.", isError: true)
             return
         }
         let mapItem = MKMapItem(placemark: MKPlacemark(coordinate: coordinate))
@@ -525,7 +513,6 @@ struct StationDetailView: View {
 } // End struct StationDetailView
 
 // Preview needs adjustment if dependencies changed significantly
-// Ensure getPhoto provides a placeholder or handles nil
 #Preview {
      // Create a sample station
      let sampleStation = RefillStation(
@@ -539,6 +526,7 @@ struct StationDetailView: View {
          photoIDs: ["sample1", "sample2"], // Sample photo IDs
          dateAdded: Date(),
          addedByUserID: "user123",
+         listingType: .user,
          averageRating: 4.2,
          ratingsCount: 5,
          isCarAccessible: true,
@@ -558,4 +546,5 @@ struct StationDetailView: View {
          }
      )
      .environmentObject(AuthManager.shared) // Provide shared AuthManager for preview
+     .environmentObject(ToastManager.shared) // Inject ToastManager to Preview
 }

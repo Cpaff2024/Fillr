@@ -5,7 +5,8 @@ struct StationReviewsView: View {
     let stationId: String
     @StateObject private var reviewsManager = ReviewsManager()
     @EnvironmentObject private var authManager: AuthManager
-    
+    @EnvironmentObject var toastManager: ToastManager // NEW: Inject Toast Manager
+
     @State private var showingSortMenu = false
     @State private var sortOption: SortOption = .recent
     @State private var showingWriteReview = false
@@ -47,7 +48,13 @@ struct StationReviewsView: View {
                 Spacer()
                 
                 if reviewsManager.userReview == nil {
-                    Button(action: { showingWriteReview = true }) {
+                    Button(action: {
+                        guard authManager.currentUser != nil else {
+                            toastManager.show(message: "You must be signed in to write a review.", isError: true)
+                            return
+                        }
+                        showingWriteReview = true
+                    }) {
                         Label("Write Review", systemImage: "square.and.pencil")
                             .font(.subheadline)
                     }
@@ -75,7 +82,13 @@ struct StationReviewsView: View {
                     Text("Be the first to share your experience")
                         .foregroundColor(.secondary)
                     
-                    Button(action: { showingWriteReview = true }) {
+                    Button(action: {
+                        guard authManager.currentUser != nil else {
+                            toastManager.show(message: "You must be signed in to write a review.", isError: true)
+                            return
+                        }
+                        showingWriteReview = true
+                    }) {
                         Text("Write a Review")
                             .padding(.horizontal, 20)
                             .padding(.vertical, 10)
@@ -128,34 +141,32 @@ struct StationReviewsView: View {
                 reviewToEdit: reviewsManager.userReview,
                 onSave: { review in
                     Task {
-                        if reviewsManager.userReview == nil {
-                            let success = await reviewsManager.postReview(review: review)
-                            if success {
-                                showingWriteReview = false
-                            }
+                        // Logic simplified to handle save directly and show toast on failure
+                        let isUpdating = reviewsManager.userReview != nil
+                        let success: Bool
+                        
+                        if isUpdating {
+                            success = await reviewsManager.updateReview(review: review)
                         } else {
-                            let success = await reviewsManager.updateReview(review: review)
-                            if success {
-                                showingWriteReview = false
-                            }
+                            success = await reviewsManager.postReview(review: review)
+                        }
+                        
+                        if success {
+                            showingWriteReview = false
+                            // Toast is managed by the calling view (StationDetailView) but we add a fallback toast for clarity if opened directly
+                            toastManager.show(message: isUpdating ? "Review updated!" : "Review posted!", isError: false)
+                        } else {
+                            // If failure, the error is in ReviewsManager, use Toast to inform the user
+                            toastManager.show(message: reviewsManager.errorMessage ?? "Failed to save review.", isError: true)
                         }
                     }
                 }
             )
             .environmentObject(authManager)
+            .environmentObject(toastManager) // Inject Toast Manager
         }
         .onAppear {
             reviewsManager.fetchReviews(for: stationId, currentUserId: authManager.currentUser?.id)
-        }
-        .alert(isPresented: Binding(
-            get: { reviewsManager.errorMessage != nil },
-            set: { if !$0 { reviewsManager.errorMessage = nil } }
-        )) {
-            Alert(
-                title: Text("Error"),
-                message: Text(reviewsManager.errorMessage ?? "An unknown error occurred"),
-                dismissButton: .default(Text("OK"))
-            )
         }
     }
     
@@ -178,6 +189,7 @@ struct StationReviewsView: View {
     // MARK: - Actions
     
     private func editReview(_ review: StationReview) {
+        // Set the review to be edited (this is correct for pre-filling WriteReviewView)
         reviewsManager.userReview = review
         showingWriteReview = true
     }
@@ -186,29 +198,48 @@ struct StationReviewsView: View {
         Task {
             let success = await reviewsManager.deleteReview(review: review)
             if success {
+                // UPDATED: Show success toast
+                toastManager.show(message: "Review deleted.", isError: false)
                 // Will be updated via the listener
+            } else {
+                 // UPDATED: Show error toast
+                toastManager.show(message: reviewsManager.errorMessage ?? "Failed to delete review.", isError: true)
             }
         }
     }
     
     private func markHelpful(_ review: StationReview) {
         guard let userId = authManager.currentUser?.id else {
+            toastManager.show(message: "You must be logged in to mark reviews as helpful.", isError: true)
             return
         }
         
         Task {
-            let _ = await reviewsManager.markReviewAsHelpful(review: review, userId: userId)
+            let success = await reviewsManager.markReviewAsHelpful(review: review, userId: userId)
+            if success {
+                toastManager.show(message: "Marked as helpful!", isError: false)
+            } else {
+                 // UPDATED: Show error toast (if user already marked it, the error message is set internally)
+                toastManager.show(message: reviewsManager.errorMessage ?? "Failed to mark as helpful.", isError: true)
+            }
         }
     }
     
     private func reportReview(_ review: StationReview) {
         Task {
-            let _ = await reviewsManager.reportReview(review: review)
+            let success = await reviewsManager.reportReview(review: review)
+            if success {
+                // UPDATED: Show success toast
+                toastManager.show(message: "Review reported. Thank you for your feedback.", isError: false)
+            } else {
+                 // UPDATED: Show error toast
+                toastManager.show(message: reviewsManager.errorMessage ?? "Failed to report review.", isError: true)
+            }
         }
     }
 }
 
-// MARK: - Supporting Views
+// MARK: - Supporting Views (Unchanged)
 
 struct RatingSummaryView: View {
     let averageRating: Double
@@ -373,6 +404,7 @@ struct StationReviewsView_Previews: PreviewProvider {
         NavigationView {
             StationReviewsView(stationId: "previewStationId")
                 .environmentObject(AuthManager.shared)
+                .environmentObject(ToastManager.shared) // Inject Toast Manager
         }
     }
 }

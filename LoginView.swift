@@ -2,6 +2,7 @@ import SwiftUI
 
 struct LoginView: View {
     @EnvironmentObject var authManager: AuthManager
+    @EnvironmentObject var toastManager: ToastManager // NEW: Inject Toast Manager
     
     @State private var email = ""
     @State private var password = ""
@@ -9,10 +10,6 @@ struct LoginView: View {
     
     @State private var showingForgotPassword = false
     @State private var showingSignUp = false
-    
-    @State private var showingAlert = false
-    @State private var alertTitle = ""
-    @State private var alertMessage = ""
     
     var body: some View {
         NavigationView {
@@ -120,27 +117,15 @@ struct LoginView: View {
                 .padding()
             }
             .navigationBarHidden(true)
-            .alert(isPresented: $showingAlert) {
-                Alert(
-                    title: Text(alertTitle),
-                    message: Text(alertMessage),
-                    dismissButton: .default(Text("OK"))
-                )
-            }
             .fullScreenCover(isPresented: $showingForgotPassword) {
                 ForgotPasswordView()
                     .environmentObject(authManager)
+                    .environmentObject(toastManager) // Inject Toast Manager
             }
             .fullScreenCover(isPresented: $showingSignUp) {
                 SignUpView()
                     .environmentObject(authManager)
-            }
-            .onChange(of: authManager.errorMessage) { oldValue, newValue in
-                if let errorMessage = newValue {
-                    alertTitle = "Error"
-                    alertMessage = errorMessage
-                    showingAlert = true
-                }
+                    .environmentObject(toastManager) // Inject Toast Manager
             }
         }
     }
@@ -148,9 +133,8 @@ struct LoginView: View {
     private func signIn() {
         authManager.signIn(email: email, password: password) { success, message in
             if !success, let message = message {
-                alertTitle = "Sign In Error"
-                alertMessage = message
-                showingAlert = true
+                // UPDATED: Use ToastManager
+                toastManager.show(message: message, isError: true)
             }
         }
     }
@@ -159,4 +143,5 @@ struct LoginView: View {
 #Preview {
     LoginView()
         .environmentObject(AuthManager.shared)
+        .environmentObject(ToastManager.shared) // Inject Toast Manager
 }

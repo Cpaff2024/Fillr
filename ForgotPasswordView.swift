@@ -3,11 +3,9 @@ import SwiftUI
 struct ForgotPasswordView: View {
     @EnvironmentObject var authManager: AuthManager
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject var toastManager: ToastManager // NEW: Inject Toast Manager
     
     @State private var email = ""
-    @State private var showingAlert = false
-    @State private var alertTitle = ""
-    @State private var alertMessage = ""
     @State private var resetSent = false
     
     var body: some View {
@@ -108,20 +106,6 @@ struct ForgotPasswordView: View {
                 }
             }
             .navigationBarHidden(true)
-            .alert(isPresented: $showingAlert) {
-                Alert(
-                    title: Text(alertTitle),
-                    message: Text(alertMessage),
-                    dismissButton: .default(Text("OK"))
-                )
-            }
-            .onChange(of: authManager.errorMessage) { oldValue, newValue in
-                if let errorMessage = newValue {
-                    alertTitle = "Error"
-                    alertMessage = errorMessage
-                    showingAlert = true
-                }
-            }
         }
     }
     
@@ -131,10 +115,11 @@ struct ForgotPasswordView: View {
         authManager.resetPassword(email: email) { success, message in
             if success {
                 resetSent = true
+                // UPDATED: Use ToastManager for success
+                toastManager.show(message: "Reset email sent! Please check your inbox.", isError: false)
             } else if let message = message {
-                alertTitle = "Password Reset Error"
-                alertMessage = message
-                showingAlert = true
+                // UPDATED: Use ToastManager for error
+                toastManager.show(message: message, isError: true)
             }
         }
     }
@@ -143,4 +128,5 @@ struct ForgotPasswordView: View {
 #Preview {
     ForgotPasswordView()
         .environmentObject(AuthManager.shared)
+        .environmentObject(ToastManager.shared) // Inject Toast Manager
 }

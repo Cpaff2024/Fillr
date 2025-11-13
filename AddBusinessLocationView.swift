@@ -5,6 +5,8 @@ struct AddBusinessLocationView: View {
     @Binding var isPresented: Bool
     @EnvironmentObject var authManager: AuthManager
     @EnvironmentObject var stationsViewModel: RefillStationsViewModel
+    // NEW: Inject Toast Manager
+    @EnvironmentObject var toastManager: ToastManager
 
     // Form state
     @State private var name: String = ""
@@ -16,8 +18,8 @@ struct AddBusinessLocationView: View {
     @State private var isCarAccessible: Bool = false
     
     @State private var isSaving = false
-    @State private var errorMessage: String?
-    @State private var showingError = false
+    // REMOVED: @State private var errorMessage: String?
+    // REMOVED: @State private var showingError = false
 
     private let businessLocationTypes: [RefillStation.LocationType] = [
         .cafe, .restaurant, .shop, .pub, .other
@@ -79,11 +81,7 @@ struct AddBusinessLocationView: View {
                 }
             }
             .overlay(isSaving ? ProgressView("Saving...") : nil)
-            .alert("Error", isPresented: $showingError, presenting: errorMessage) { _ in
-                Button("OK") {}
-            } message: { message in
-                Text(message)
-            }
+            // REMOVED: .alert modifier
         }
     }
 
@@ -94,22 +92,22 @@ struct AddBusinessLocationView: View {
         let geocoder = CLGeocoder()
         geocoder.geocodeAddressString(address) { placemarks, error in
             if let error = error {
-                self.errorMessage = "Could not find coordinates for address. Please check it is correct. Error: \(error.localizedDescription)"
-                self.showingError = true
+                // UPDATED: Use ToastManager
+                toastManager.show(message: "Could not find coordinates for address. Error: \(error.localizedDescription)", isError: true)
                 self.isSaving = false
                 return
             }
             
             guard let coordinate = placemarks?.first?.location?.coordinate else {
-                self.errorMessage = "Address found, but could not determine map coordinates."
-                self.showingError = true
+                // UPDATED: Use ToastManager
+                toastManager.show(message: "Address found, but could not determine map coordinates.", isError: true)
                 self.isSaving = false
                 return
             }
             
             guard let userId = authManager.currentUser?.id else {
-                self.errorMessage = "You must be logged in."
-                self.showingError = true
+                // UPDATED: Use ToastManager
+                toastManager.show(message: "You must be logged in.", isError: true)
                 self.isSaving = false
                 return
             }
@@ -134,10 +132,12 @@ struct AddBusinessLocationView: View {
             stationsViewModel.addStation(newStation, photos: []) { success, errorMsg in
                 self.isSaving = false
                 if success {
+                    // UPDATED: Use ToastManager for success
+                    toastManager.show(message: "Business location submitted for review!", isError: false)
                     isPresented = false // Dismiss sheet on success
                 } else {
-                    self.errorMessage = errorMsg ?? "An unknown error occurred while saving."
-                    self.showingError = true
+                    // UPDATED: Use ToastManager for error
+                    toastManager.show(message: errorMsg ?? "An unknown error occurred while saving.", isError: true)
                 }
             }
         }

@@ -2,10 +2,14 @@ import SwiftUI
 import UIKit
 import PhotosUI
 
+// The extracted components (StatCard, SettingsOptionRow, SettingsViewSheet, ImagePicker)
+// are now accessible because they are in the same module (the main target).
+
 struct ProfileView: View {
     // Environment
     @EnvironmentObject var authManager: AuthManager
     @EnvironmentObject var locationManager: LocationManager
+    @EnvironmentObject var toastManager: ToastManager
     @Environment(\.dismiss) private var dismiss
 
     // State
@@ -18,22 +22,26 @@ struct ProfileView: View {
     @State private var alertTitle = ""
     @State private var alertMessage = ""
 
-    private var bottlesSaved: Int {
+    // Use properties from the consolidated User model
+    private var refillsLogged: Int {
         authManager.currentUser?.personalRefillsLogged ?? 0
     }
     private var co2SavedKg: Int {
-        Int(Double(bottlesSaved) * 0.082)
+        authManager.currentUser?.co2SavedKg ?? 0
     }
 
     private var earnedBadges: [Badge] {
         guard let user = authManager.currentUser else { return [] }
         var badges: [Badge] = []
+        
         if user.personalRefillsLogged >= 1 { badges.append(Badges.firstRefill) }
         if user.personalRefillsLogged >= 10 { badges.append(Badges.tenRefills) }
         if user.personalRefillsLogged >= 50 { badges.append(Badges.fiftyRefills) }
+        
         if user.stationsAdded >= 1 { badges.append(Badges.firstStation) }
         if user.stationsAdded >= 5 { badges.append(Badges.fiveStations) }
         if user.stationsAdded >= 10 { badges.append(Badges.tenStations) }
+        
         return badges
     }
 
@@ -57,11 +65,16 @@ struct ProfileView: View {
                     Button("Done") { dismiss() }
                 }
             }
+            // Use the extracted SettingsViewSheet
             .sheet(isPresented: $showSettingsView) { SettingsViewSheet(isPresented: $showSettingsView) }
+            // Use the extracted ImagePicker
             .sheet(isPresented: $showingImagePicker) { ImagePicker(image: $inputImage) }
+            // Change is now handled by an async Task
             .onChange(of: inputImage, handleImageSelection)
             .alert(alertTitle, isPresented: $showAlert) { Button("OK") {} } message: { Text(alertMessage) }
-            .onAppear { if authManager.currentUser != nil { loadProfileImage() } }
+            .onAppear { // Use onAppear to call async function
+                loadProfileImage()
+            }
         }
     }
 
@@ -87,8 +100,10 @@ struct ProfileView: View {
              Text("My Contributions").font(.headline)
              if let user = authManager.currentUser {
                   HStack(spacing: 0) {
+                      // Uses extracted StatCard
                       NavigationLink { UserStationsListView().environmentObject(authManager) } label: { StatCard(icon: "mappin.and.ellipse", value: "\(user.stationsAdded)", label: "Stations Added") }.buttonStyle(.plain)
                       Divider().frame(height: 40).padding(.horizontal, 8)
+                      // Uses extracted StatCard
                       NavigationLink { FavoritesView().environmentObject(authManager) } label: { StatCard(icon: "heart.text.square.fill", value: "\(user.favoriteStations.count)", label: "Favorites") }.buttonStyle(.plain)
                   }
                   .padding(.vertical, 8).background(Color.blue.opacity(0.05)).cornerRadius(10)
@@ -100,14 +115,16 @@ struct ProfileView: View {
     private var yourImpactSection: some View {
          VStack(alignment: .leading, spacing: 16) {
              Text("Your Personal Impact").font(.headline)
-             if bottlesSaved > 0 {
+             if refillsLogged > 0 {
                   HStack(spacing: 16) {
-                      StatCard(icon: "trash.slash.fill", value: "\(bottlesSaved)", label: "Bottles Saved")
+                      // Uses extracted StatCard
+                      StatCard(icon: "trash.slash.fill", value: "\(refillsLogged)", label: "Bottles Saved")
+                      // Uses extracted StatCard
                       StatCard(icon: "leaf.fill", value: "\(co2SavedKg)kg", label: "CO₂ Saved")
                   }
                   HStack {
                       Image(systemName: "info.circle").foregroundColor(.secondary)
-                      Text("Estimates based on your logged refills (\(authManager.currentUser?.personalRefillsLogged ?? 0)).").font(.caption).foregroundColor(.secondary)
+                      Text("Estimates based on your logged refills (\(refillsLogged)).").font(.caption).foregroundColor(.secondary)
                   }.padding(.top, 4)
               } else { Text("Log your refills at stations to see your personal impact!").foregroundColor(.secondary).padding() }
          }
@@ -149,16 +166,14 @@ struct ProfileView: View {
                 .frame(height: 95)
             }
         }
-        .padding()
-        .background(Color(.secondarySystemBackground))
-        .cornerRadius(12)
-        .shadow(color: Color.black.opacity(0.08), radius: 5, x: 0, y: 2)
+        .padding().background(Color(.secondarySystemBackground)).cornerRadius(12).shadow(color: Color.black.opacity(0.08), radius: 5, x: 0, y: 2)
     }
 
     private var navigationLinksSection: some View {
         VStack(alignment: .leading, spacing: 0) {
              if authManager.currentUser?.role == "business" {
                  NavigationLink { BusinessDashboardView().environmentObject(authManager) } label: {
+                     // Uses extracted SettingsOptionRow
                      SettingsOptionRow(icon: "briefcase.fill", text: "Business Dashboard")
                  }
                  Divider().padding(.leading)
@@ -166,6 +181,7 @@ struct ProfileView: View {
             
              NavigationLink { DraftStationListView().environmentObject(authManager).environmentObject(locationManager) } label: { SettingsOptionRow(icon: "doc.text.magnifyingglass", text: "Draft Stations") }
              Divider().padding(.leading)
+             // Uses extracted SettingsOptionRow
              Button { showSettingsView = true } label: { SettingsOptionRow(icon: "gear", text: "App Settings") }
              Divider().padding(.leading)
              Button { /* TODO: Action */ } label: { SettingsOptionRow(icon: "questionmark.circle", text: "Help & FAQ") }
@@ -178,9 +194,7 @@ struct ProfileView: View {
              Divider().padding(.leading)
              Button { /* TODO: Action */ } label: { SettingsOptionRow(icon: "doc.text", text: "Terms of Service") }
          }
-         .buttonStyle(.plain)
-         .padding(.vertical)
-         .background(Color(.secondarySystemBackground)).cornerRadius(12).shadow(color: Color.black.opacity(0.08), radius: 5, x: 0, y: 2)
+         .buttonStyle(.plain).padding(.vertical).background(Color(.secondarySystemBackground)).cornerRadius(12).shadow(color: Color.black.opacity(0.08), radius: 5, x: 0, y: 2)
     }
 
     private var signOutButton: some View {
@@ -192,10 +206,11 @@ struct ProfileView: View {
           .padding(.top, 10)
     }
 
+    // UPDATED: Now uses Task to upload image
     private func handleImageSelection(_ oldImage: UIImage?, _ newImage: UIImage?) {
         guard let image = newImage else { return }
         profileImage = image
-        uploadProfileImage(image)
+        Task { await uploadProfileImage(image) }
     }
 
     private func formattedDate(_ date: Date) -> String {
@@ -205,100 +220,60 @@ struct ProfileView: View {
          return formatter.string(from: date)
      }
 
+    // UPDATED: Now uses Task and async throws function
     private func loadProfileImage() {
-         guard let user = authManager.currentUser, let profilePath = user.profileImageUrl, !profilePath.isEmpty else { self.profileImage = nil; return }
+        // Only load if current user exists AND has an image path
+         guard authManager.currentUser != nil,
+               let profilePath = authManager.currentUser?.profileImageUrl,
+               !profilePath.isEmpty
+         else {
+             self.profileImage = nil
+             return
+         }
+         
          isLoadingImage = true
-         FirebaseManager.shared.downloadProfilePhoto(profileImageUrlOrPath: profilePath) { result in
-             DispatchQueue.main.async {
-                 self.isLoadingImage = false
-                 switch result {
-                 case .success(let image): self.profileImage = image
-                 case .failure(let error): print("🔴 ProfileView: Failed to load profile image: \(error.localizedDescription)"); self.profileImage = nil
+         Task { @MainActor in // Use @MainActor isolation for safe UI updates
+             do {
+                 let image = try await FirebaseManager.shared.downloadProfilePhoto(profileImageUrlOrPath: profilePath)
+                 self.profileImage = image
+             } catch {
+                 print("🔴 ProfileView: Failed to load profile image: \(error.localizedDescription)")
+                 self.profileImage = nil
+             }
+             self.isLoadingImage = false
+         }
+     }
+
+    // UPDATED: Now uses Task and async throws function
+    private func uploadProfileImage(_ image: UIImage) async {
+         guard let userId = authManager.currentUser?.id else {
+             toastManager.show(message: "User not logged in.", isError: true)
+             return
+         }
+         
+         isLoadingImage = true
+         
+         do {
+             let path = try await FirebaseManager.shared.uploadProfilePhoto(userId: userId, image: image)
+             
+             // Update AuthManager (which still uses closure-based updateProfile)
+             authManager.updateProfile(username: nil, profileImageUrl: path) { success, errorMsg in
+                 // This closure is run on the main thread inside the AuthManager's implementation
+                 if success {
+                     print("✅ ProfileView: Successfully updated profile URL.")
+                 } else {
+                     self.toastManager.show(message: errorMsg ?? "Failed to update profile URL.", isError: true)
                  }
              }
+         } catch {
+             print("🔴 ProfileView: Failed to upload profile image: \(error.localizedDescription)")
+             self.toastManager.show(message: error.localizedDescription, isError: true)
          }
-     }
-
-    private func uploadProfileImage(_ image: UIImage) {
-         guard let userId = authManager.currentUser?.id else { alertTitle = "Error"; alertMessage = "User not logged in."; showAlert = true; return }
-         isLoadingImage = true
-         FirebaseManager.shared.uploadProfilePhoto(userId: userId, image: image) { result in
-             DispatchQueue.main.async {
-                 self.isLoadingImage = false
-                 switch result {
-                 case .success(let path):
-                     print("✅ ProfileView: Successfully uploaded profile image. Path: \(path)")
-                     if self.authManager.currentUser?.profileImageUrl != path { self.authManager.currentUser?.profileImageUrl = path }
-                 case .failure(let error):
-                     print("🔴 ProfileView: Failed to upload profile image: \(error.localizedDescription)")
-                     self.alertTitle = "Upload Failed"; self.alertMessage = error.localizedDescription; self.showAlert = true
-                 }
-             }
+         
+         // This should run last, ensuring UI updates are safe
+         await MainActor.run {
+             self.isLoadingImage = false
          }
-     }
-}
-
-// --- HELPER VIEWS ADDED BACK IN ---
-
-struct StatCard: View {
-    let icon: String
-    let value: String
-    let label: String
-    var body: some View {
-        VStack(spacing: 4) {
-            Image(systemName: icon).font(.system(size: 24)).foregroundColor(.blue)
-            Text(value).font(.title2).fontWeight(.bold).lineLimit(1).minimumScaleFactor(0.8)
-            Text(label).font(.caption).foregroundColor(.secondary).multilineTextAlignment(.center).lineLimit(2)
-        }
-        .frame(maxWidth: .infinity, minHeight: 80)
-        .padding(.horizontal, 4)
-    }
-}
-
-struct SettingsOptionRow: View {
-    let icon: String
-    let text: String
-    var body: some View {
-        HStack {
-            Image(systemName: icon).foregroundColor(.blue).frame(width: 25, alignment: .center)
-            Text(text).foregroundColor(.primary)
-            Spacer()
-            Image(systemName: "chevron.right").font(.caption).foregroundColor(.secondary.opacity(0.5))
-        }
-        .padding(.vertical, 12)
-        .padding(.horizontal)
-        .contentShape(Rectangle())
-    }
-}
-
-struct SettingsViewSheet: View {
-    @Binding var isPresented: Bool
-    @AppStorage("isDarkMode") private var isDarkMode = false
-    @AppStorage("defaultSearchRadius") private var defaultRadius: Double = 1.0
-    @AppStorage("notificationsEnabled") private var notificationsEnabled = true
-    var body: some View {
-         NavigationView {
-             Form {
-                 Section("Map Settings") { VStack(alignment: .leading) { Text("Default Search Radius: \(Int(defaultRadius)) mile\(defaultRadius == 1 ? "" : "s")"); Slider(value: $defaultRadius, in: 1...10, step: 1) } }
-                 Section("Notifications") { Toggle("Enable Notifications", isOn: $notificationsEnabled) }
-                 Section("Appearance") { Toggle("Dark Mode", isOn: $isDarkMode) }
-                 Section("About") { HStack { Text("Version"); Spacer(); Text("2.0.1").foregroundColor(.secondary) }; Button("Contact Support") {}; Button("Privacy Policy") {}; Button("Terms of Service") {} }
-             }
-             .navigationTitle("Settings").navigationBarTitleDisplayMode(.inline).toolbar { ToolbarItem(placement: .navigationBarTrailing) { Button("Done") { isPresented = false } } }
-         }
-     }
-}
-
-struct ImagePicker: UIViewControllerRepresentable {
-     @Binding var image: UIImage?
-     @Environment(\.presentationMode) private var presentationMode
-     func makeUIViewController(context: Context) -> UIImagePickerController { let picker = UIImagePickerController(); picker.delegate = context.coordinator; picker.allowsEditing = true; return picker }
-     func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {}
-     func makeCoordinator() -> Coordinator { Coordinator(self) }
-     class Coordinator: NSObject, UINavigationControllerDelegate, UIImagePickerControllerDelegate {
-         let parent: ImagePicker; init(_ parent: ImagePicker) { self.parent = parent }
-         func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey : Any]) { if let img = info[.editedImage] as? UIImage { parent.image = img } else if let img = info[.originalImage] as? UIImage { parent.image = img }; parent.presentationMode.wrappedValue.dismiss() }
-         func imagePickerControllerDidCancel(_ picker: UIImagePickerController) { parent.presentationMode.wrappedValue.dismiss() }
      }
 }
 
@@ -307,4 +282,5 @@ struct ImagePicker: UIViewControllerRepresentable {
     ProfileView()
         .environmentObject(AuthManager.shared)
         .environmentObject(LocationManager())
+        .environmentObject(ToastManager.shared)
 }

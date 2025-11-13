@@ -6,9 +6,6 @@ struct FavoritesView: View {
     @EnvironmentObject private var authManager: AuthManager
 
     // ViewModel for loading station data
-    // NOTE: Consider if this ViewModel should be passed in or if fetching
-    // favorite station details needs a different approach.
-    // For now, it's used mainly for getPhoto.
     @StateObject private var stationsViewModel = RefillStationsViewModel()
 
     // State for managing the actual list of favorite stations
@@ -136,25 +133,16 @@ struct FavoritesView: View {
 
         Task {
             do {
-                // Fetch station details from Firestore for each favorite ID
-                // This assumes you have a way to fetch multiple stations by ID
-                // (You might need to add a function to FirebaseManager for this)
-                // For now, simulate fetching or use a placeholder method.
-
-                // Placeholder: Fetching logic needs implementation in FirebaseManager/ViewModel
-                // let fetchedStations = try await FirebaseManager.shared.fetchStations(byIDs: favoriteIDs)
-
-                // --- TEMPORARY SIMULATION ---
-                // In a real app, replace this with actual Firestore fetching.
-                 print("Simulating fetch for favorite IDs: \(favoriteIDs)")
-                 let fetchedStations = await simulateFetchStations(byIDs: favoriteIDs)
-                 // --- END SIMULATION ---
-
+                // Use the new FirebaseManager function to fetch stations by ID
+                let fetchedStations = try await FirebaseManager.shared.fetchStations(byIDs: favoriteIDs)
 
                 // Update UI on the main thread
                 await MainActor.run {
                     isLoading = false
-                    favoriteStationsList = fetchedStations.sorted { $0.name < $1.name } // Sort alphabetically
+                    // Filter the fetched stations to match the order of the favorite IDs,
+                    // though sorting alphabetically is fine for now.
+                    favoriteStationsList = fetchedStations.sorted { $0.name < $1.name }
+                    
                     if favoriteStationsList.isEmpty && !favoriteIDs.isEmpty {
                         // Handle case where IDs exist but fetch failed or returned nothing
                         errorMessage = "Could not load details for favorite stations."
@@ -171,19 +159,6 @@ struct FavoritesView: View {
         }
     }
 
-    // --- SIMULATION FUNCTION (Replace with real fetch) ---
-    private func simulateFetchStations(byIDs ids: [String]) async -> [RefillStation] {
-        // Simulate network delay
-        try? await Task.sleep(nanoseconds: 1_000_000_000)
-        // Return some dummy stations based on IDs for testing
-        return ids.compactMap { id -> RefillStation? in
-             guard let uuid = UUID(uuidString: id) else { return nil }
-             // Create a dummy station for preview/testing
-             return RefillStation(id: uuid, coordinate: CLLocationCoordinate2D(latitude: 51.5 + Double.random(in: -0.01...0.01), longitude: -0.1 + Double.random(in: -0.01...0.01)), name: "Favorite \(id.prefix(4))...", description: "Fetched favorite", locationType: RefillStation.LocationType.allCases.randomElement() ?? .cafe, cost: .free, limitations: "Varies", addedByUserID: "testUser")
-         }
-    }
-    // --- END SIMULATION ---
-
     // Remove a station from favorites (calls AuthManager)
     private func removeStationFromFavorites(station: RefillStation) {
         print("Attempting to remove favorite: \(station.id.uuidString)")
@@ -192,8 +167,6 @@ struct FavoritesView: View {
                 print("Successfully removed \(station.id.uuidString) via AuthManager")
                 // The onChange modifier reacting to authManager.currentUser.favoriteStations
                 // should trigger the reload automatically.
-                // Optionally, remove locally for immediate UI update:
-                // favoriteStationsList.removeAll { $0.id == station.id }
             } else {
                 print("Failed to remove favorite: \(errorMsg ?? "Unknown error")")
                 // Optionally show an alert to the user
@@ -290,16 +263,22 @@ struct FavoritesView_Previews: PreviewProvider {
         // Create a mock AuthManager with some favorite IDs for preview
         let mockAuthManager: AuthManager = {
             let manager = AuthManager.shared // Use shared instance if possible
-            // Simulate a logged-in user with favorites
+            // Simulate a logged-in user with favorites using the new User struct
             manager.currentUser = User(
                 id: "previewUser",
                 email: "preview@test.com",
                 username: "Previewer",
                 dateJoined: Date(),
                 profileImageUrl: nil,
+                role: "user",
+                isVerified: true,
                 stationsAdded: 2,
+                reviewsWritten: 1,
+                personalRefillsLogged: 5,
                 favoriteStations: [UUID().uuidString, UUID().uuidString], // Add some dummy IDs
-                isVerified: true
+                defaultSearchRadius: 1.0,
+                useDarkMode: false,
+                notificationsEnabled: true
             )
             manager.isAuthenticated = true
             return manager

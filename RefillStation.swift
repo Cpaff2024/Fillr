@@ -1,7 +1,6 @@
 import Foundation
 import CoreLocation
 import SwiftUI // Needed for Color in Enums
-import FirebaseFirestore // Import for GeoPoint/Timestamp
 
 // Define the Listing Type Enum
 enum ListingType: String, Codable, CaseIterable {
@@ -10,7 +9,7 @@ enum ListingType: String, Codable, CaseIterable {
 }
 
 // Make struct Codable for saving/loading drafts
-struct RefillStation: Identifiable, Hashable, Codable {
+struct RefillStation: Identifiable, Hashable, Codable, Equatable {
     var id: UUID // Keep UUID for consistency with previous code
     var coordinate: CLLocationCoordinate2D? // Optional for drafts
     var name: String
@@ -107,10 +106,8 @@ struct RefillStation: Identifiable, Hashable, Codable {
 
     // --- Hashable & Equatable ---
     func hash(into hasher: inout Hasher) { hasher.combine(id) }
-    static func == (lhs: RefillStation, rhs: RefillStation) -> Bool { lhs.id == rhs.id }
 
     // --- Initializers ---
-    // Add listingType parameter with default
     init(id: UUID = UUID(), coordinate: CLLocationCoordinate2D? = nil, name: String, description: String, locationType: LocationType, cost: RefillCost, limitations: String, photoIDs: [String] = [], dateAdded: Date = Date(), addedByUserID: String, listingType: ListingType = .user, averageRating: Double? = nil, ratingsCount: Int = 0, isCarAccessible: Bool? = nil, isDraft: Bool = false, manualAddress: String? = nil, manualDescription: String? = nil) {
         self.id = id
         self.coordinate = coordinate
@@ -181,58 +178,5 @@ struct RefillStation: Identifiable, Hashable, Codable {
          try container.encode(isDraft, forKey: .isDraft)
          try container.encodeIfPresent(manualAddress, forKey: .manualAddress)
          try container.encodeIfPresent(manualDescription, forKey: .manualDescription)
-     }
-
-
-    // --- Static helper for parsing from Firestore (Include listingType) ---
-     static func fromFirestoreDocument(_ document: QueryDocumentSnapshot) -> RefillStation? {
-         let data = document.data()
-         guard
-             let location = data["location"] as? GeoPoint,
-             let name = data["name"] as? String,
-             let typeString = data["type"] as? String,
-             let costString = data["cost"] as? String,
-             let description = data["description"] as? String,
-             let limitations = data["limitations"] as? String,
-             let photoIDs = data["photoIDs"] as? [String],
-             let timestamp = data["dateAdded"] as? Timestamp,
-             let addedBy = data["addedBy"] as? String
-         else {
-              print("⚠️ Failed to parse station document \(document.documentID). Missing required fields for a final station.")
-             return nil
-         }
-
-         let locationType = RefillStation.LocationType(rawValue: typeString) ?? .other
-         let costType = RefillStation.RefillCost(rawValue: costString) ?? .free
-
-         // Parse listingType, default to .user if field doesn't exist in Firestore yet
-         let listingTypeString = data["listingType"] as? String
-         let listingType = ListingType(rawValue: listingTypeString ?? "") ?? .user
-
-         let isCarAccessible = data["isCarAccessible"] as? Bool
-         let averageRating = data["averageRating"] as? Double
-         let ratingsCount = data["ratingsCount"] as? Int ?? 0
-         let manualAddress = data["manualAddress"] as? String
-         let manualDescription = data["manualDescription"] as? String
-
-         return RefillStation(
-             id: UUID(uuidString: document.documentID) ?? UUID(),
-             coordinate: CLLocationCoordinate2D(latitude: location.latitude, longitude: location.longitude),
-             name: name,
-             description: description,
-             locationType: locationType,
-             cost: costType,
-             limitations: limitations,
-             photoIDs: photoIDs,
-             dateAdded: timestamp.dateValue(),
-             addedByUserID: addedBy,
-             listingType: listingType, // Assign parsed listingType
-             averageRating: averageRating,
-             ratingsCount: ratingsCount,
-             isCarAccessible: isCarAccessible,
-             isDraft: false, // Mark as NOT a draft when fetching from Firestore
-             manualAddress: manualAddress,
-             manualDescription: manualDescription
-         )
      }
 }

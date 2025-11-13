@@ -9,13 +9,12 @@ struct DraftStationListView: View {
     @EnvironmentObject var authManager: AuthManager
 
     // Add StateObject for the ViewModel needed for submission
-    // We might need this to call the addStation method which handles Firebase logic
     @StateObject private var stationsViewModel = RefillStationsViewModel()
 
-    // State for showing toast messages
-    @State private var showToast = false
-    @State private var toastMessage = ""
-    @State private var toastIsError = false
+    // NEW: Inject Toast Manager
+    @EnvironmentObject private var toastManager: ToastManager
+    
+    // Removed local toast state: showToast, toastMessage, toastIsError
 
     var body: some View {
         // Wrap ZStack for Toast Overlay
@@ -88,21 +87,21 @@ struct DraftStationListView: View {
                         coordinate: nil, // AddStationView will handle fetching location if needed
                         draftToEdit: draftToComplete,
                         onSave: { station, photos in
-                            // --- START: Implemented Save Logic ---
+                            // --- START: Implemented Save Logic (UPDATED for ToastManager) ---
                             print("✅ DraftListView: onSave closure triggered for submitting draft \(station.id)")
 
                             // Basic validation (should also be handled within AddStationView, but double check)
                             if station.coordinate == nil {
-                                toastMessage = "Location data is missing."
-                                toastIsError = true; withAnimation { showToast = true }; return
+                                toastManager.show(message: "Location data is missing.", isError: true)
+                                return
                             }
                             if photos.isEmpty {
-                                toastMessage = "Please add at least one photo."
-                                toastIsError = true; withAnimation { showToast = true }; return
+                                toastManager.show(message: "Please add at least one photo.", isError: true)
+                                return
                             }
                             guard let userId = authManager.currentUser?.id else {
-                                toastMessage = "Error: Not logged in."
-                                toastIsError = true; withAnimation { showToast = true }; return
+                                toastManager.show(message: "Error: Not logged in.", isError: true)
+                                return
                             }
 
                             // Ensure the station being submitted has the correct user ID and is not a draft
@@ -118,49 +117,28 @@ struct DraftStationListView: View {
                                     DraftStorageManager.shared.deleteDraft(id: finalStation.id)
 
                                     // Dismiss the sheet and show success
-                                    toastMessage = "Station submitted successfully!"
-                                    toastIsError = false
+                                    toastManager.show(message: "Station submitted successfully!", isError: false)
                                     showingAddStationSheet = false // Dismiss sheet on success
 
                                 } else {
                                     print("🔴 DraftListView: Firebase submission failed for \(finalStation.id): \(errorMsg ?? "Unknown error")")
-                                    // Show error, DO NOT delete local draft, keep sheet open? Or dismiss? Let's dismiss.
-                                    toastMessage = errorMsg ?? "Failed to submit station."
-                                    toastIsError = true
+                                    // Show error, DO NOT delete local draft.
+                                    toastManager.show(message: errorMsg ?? "Failed to submit station.", isError: true)
                                     showingAddStationSheet = false // Dismiss sheet even on error for now
                                 }
-                                // Show toast message regardless of success/failure
-                                withAnimation { showToast = true }
+                                // No separate toast trigger needed as it's handled inside the completion block
                             }
                             // --- END: Implemented Save Logic ---
                         }
                     )
                     .environmentObject(locationManager)
                     .environmentObject(authManager)
-                    // We might need to pass stationsViewModel down too if AddStationView needs it directly,
-                    // but for now, DraftStationListView uses its own instance.
+                    .environmentObject(toastManager) // Inject ToastManager
                 }
             }
 
-            // --- Toast Message Overlay ---
-            VStack {
-                Spacer()
-                if showToast {
-                    Text(toastMessage)
-                        .padding()
-                        .background(toastIsError ? Color.red.opacity(0.9) : Color.green.opacity(0.9))
-                        .foregroundColor(.white).cornerRadius(10).shadow(radius: 3)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                        .onAppear {
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 3.5) { // Longer duration
-                                withAnimation { showToast = false }
-                            }
-                        }
-                        .padding(.bottom)
-                }
-            }
-            .padding(.horizontal)
-            // --- End Toast Overlay ---
+            // --- REMOVED: Toast Message Overlay as it is global now ---
+            // The global ToastOverlay is typically placed in the root view (MapView in this case).
 
         } // End ZStack
 
@@ -177,6 +155,8 @@ struct DraftStationListView: View {
             DraftStorageManager.shared.deleteDraft(id: draft.id)
             print("🗑️ Deleted draft \(draft.id) directly from list view.")
         }
+        // OPTIONAL: Show a confirmation toast upon deletion
+        toastManager.show(message: "Draft deleted.", isError: false)
     }
 }
 
@@ -186,5 +166,6 @@ struct DraftStationListView: View {
         DraftStationListView()
            .environmentObject(AuthManager.shared)
            .environmentObject(LocationManager())
+           .environmentObject(ToastManager.shared)
     }
 }

@@ -25,7 +25,7 @@ extension View {
     }
 }
 
-// MARK: - Extracted Subviews (No changes needed in these)
+// MARK: - Extracted Subviews (Updated for ToastManager)
 
 // Extracted View for Map Buttons and Greeting
 struct MapControlsOverlay: View {
@@ -33,9 +33,10 @@ struct MapControlsOverlay: View {
     @Binding var showingProfile: Bool
     @Binding var showingFilters: Bool
     @Binding var showingAddStation: Bool
-    @Binding var showToast: Bool
-    @Binding var toastMessage: String
-    @Binding var toastIsError: Bool
+    
+    // Toast state is now managed globally
+    @EnvironmentObject var toastManager: ToastManager
+
     @Binding var showGreetingBanner: Bool
     @Binding var greetingMessage: String
 
@@ -61,8 +62,8 @@ struct MapControlsOverlay: View {
                 // Add Station Button
                 Button(action: {
                     guard locationManager.location?.coordinate != nil else {
-                        toastMessage = "Cannot determine your current location."
-                        toastIsError = true; withAnimation { showToast = true }
+                        // Use the global ToastManager
+                        toastManager.show(message: "Cannot determine your current location.", isError: true)
                         return
                     }
                     withAnimation { showingAddStation = true }
@@ -88,7 +89,7 @@ struct MapControlsOverlay: View {
     }
 }
 
-// Extracted View for Loading Indicator
+// Extracted View for Loading Indicator (unchanged)
 struct LoadingOverlay: View {
     var body: some View {
         ZStack { // Use ZStack to ensure it overlays correctly
@@ -102,36 +103,6 @@ struct LoadingOverlay: View {
     }
 }
 
-// Extracted View for Toast Message
-struct ToastOverlay: View {
-    @Binding var showToast: Bool
-    let toastMessage: String
-    let toastIsError: Bool
-
-    var body: some View {
-         VStack {
-             Spacer()
-             if showToast { // Check binding here
-                 Text(toastMessage)
-                     .padding()
-                     .background(toastIsError ? Color.red.opacity(0.9) : Color.green.opacity(0.9))
-                     .foregroundColor(.white).cornerRadius(10).shadow(radius: 3)
-                     .transition(.move(edge: .bottom).combined(with: .opacity))
-                     .onAppear {
-                          // Auto-dismiss logic
-                          DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
-                              withAnimation { showToast = false } // Hide toast via binding
-                          }
-                      }
-                      .padding(.bottom)
-             }
-         }
-         .padding(.horizontal)
-         // Animation can be controlled here or where showToast is toggled
-         .animation(.spring(), value: showToast)
-    }
-}
-
 
 // MARK: - Main MapView Struct
 
@@ -140,6 +111,9 @@ struct MapView: View {
     @EnvironmentObject var authManager: AuthManager
     @StateObject private var locationManager = LocationManager()
     @StateObject private var stationsViewModel = RefillStationsViewModel()
+    
+    // NEW: Global Toast Manager
+    @StateObject private var toastManager = ToastManager.shared
 
     // State variables for map interaction
     @State private var searchRadius: Double = 1.0 // Keep for filter view, maybe decouple from loading logic
@@ -159,9 +133,7 @@ struct MapView: View {
     // Loading and error state
     @State private var errorMessage: String? // For the alert
     @State private var showingError = false // Controls the alert
-    @State private var showToast = false // Controls the toast overlay
-    @State private var toastMessage = "" // Text for the toast
-    @State private var toastIsError = false // Color style for the toast
+    // Removed local toast state
 
     // Debouncing Setup for location AND map region changes
     private let locationUpdatePublisher = PassthroughSubject<CLLocationCoordinate2D, Never>()
@@ -184,23 +156,19 @@ struct MapView: View {
                 showingProfile: $showingProfile,
                 showingFilters: $showingFilters,
                 showingAddStation: $showingAddStation,
-                showToast: $showToast,
-                toastMessage: $toastMessage,
-                toastIsError: $toastIsError,
                 showGreetingBanner: $showGreetingBanner,
                 greetingMessage: $greetingMessage
             )
             .environmentObject(locationManager)
+            .environmentObject(toastManager) // Inject ToastManager
 
             if stationsViewModel.isLoading {
                 LoadingOverlay()
             }
-
-            ToastOverlay(
-                showToast: $showToast,
-                toastMessage: toastMessage,
-                toastIsError: toastIsError
-            )
+            
+            // Use the global ToastOverlay
+            ToastOverlay()
+                .environmentObject(toastManager)
             // --- End Overlays ---
 
         } // End Main ZStack
@@ -215,6 +183,7 @@ struct MapView: View {
              )
              .environmentObject(locationManager)
              .environmentObject(authManager)
+             .environmentObject(toastManager) // Inject ToastManager to AddStationView
          }
         .sheet(item: $selectedStation) { station in
              StationDetailView(
@@ -222,6 +191,7 @@ struct MapView: View {
                  getPhoto: stationsViewModel.getPhoto
              )
              .environmentObject(authManager)
+             .environmentObject(toastManager) // Inject ToastManager to DetailView
          }
         .sheet(isPresented: $showingFilters) {
             FilterView(
@@ -235,6 +205,7 @@ struct MapView: View {
             ProfileView()
                 .environmentObject(authManager)
                 .environmentObject(locationManager)
+                .environmentObject(toastManager) // Inject ToastManager
         }
         .alert("Error", isPresented: $showingError, presenting: stationsViewModel.errorMessage ?? errorMessage) { _ in
              Button("OK") {
@@ -298,10 +269,10 @@ struct MapView: View {
     }
 
 
-    // MARK: - Helper Functions (Unchanged from previous version)
+    // MARK: - Helper Functions (UPDATED FOR LOCATION FIX)
 
     private func setupInitialMapState() {
-        // THIS IS THE CORRECTED LINE:
+        // 1. MANDATORY: Request permission and start updates immediately.
         locationManager.requestLocationPermissionAndUpdates()
         
         setupDebouncers() // Setup both debouncers
@@ -311,17 +282,12 @@ struct MapView: View {
             stationsViewModel.loadSampleStations()
             position = .region(region)
             prepareAndShowGreeting()
-        } else if let initialLocation = locationManager.location?.coordinate {
-            print("MapView setupInitialMapState: Got initial location. Loading stations.")
-            loadStations(center: initialLocation, radius: searchRadius)
-            position = .region(MKCoordinateRegion(
-                center: initialLocation,
-                span: MKCoordinateSpan(latitudeDelta: 0.005, longitudeDelta: 0.005)
-            ))
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { prepareAndShowGreeting() }
-        } else {
-            print("MapView setupInitialMapState: Initial location not available yet.")
-            loadStations(center: region.center, radius: searchRadius)
+        }
+        // 2. REMOVED: Immediate check of locationManager.location?.coordinate because it's often nil initially.
+        // We rely entirely on the onChange handler below to set the initial position/load data when the location becomes available.
+        else {
+            print("MapView setupInitialMapState: Waiting for actual location.")
+            // Temporarily set map position to the default (London) region until location comes through.
             position = .region(region)
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { prepareAndShowGreeting() }
         }
@@ -330,6 +296,19 @@ struct MapView: View {
     private func handleLocationChange(_ oldLocation: CLLocation?, _ newLocation: CLLocation?) {
         guard let coordinate = newLocation?.coordinate else { return }
         print("MapView handleLocationChange: Location updated - \(coordinate.latitude), \(coordinate.longitude)")
+
+        // NEW LOGIC: Only perform initial load/position update once, when location goes from nil/old default to a real value.
+        let isInitialLoad = stationsViewModel.stations.isEmpty && (oldLocation == nil || oldLocation!.coordinate.latitude == 51.5074)
+
+        if isInitialLoad {
+            loadStations(center: coordinate, radius: searchRadius)
+            position = .region(MKCoordinateRegion(
+                center: coordinate,
+                span: MKCoordinateSpan(latitudeDelta: 0.005, longitudeDelta: 0.005)
+            ))
+            print("MapView: Initial load and position set to current location.")
+        }
+
         locationUpdatePublisher.send(coordinate)
     }
 
@@ -384,8 +363,8 @@ struct MapView: View {
     }
 
     private func handleAddStationSave(station: RefillStation, photos: [UIImage]) {
-         if photos.isEmpty { showToastMessage("Please add at least one photo", isError: true); return }
-         guard let userId = authManager.currentUser?.id else { showToastMessage("You must be logged in to add a station.", isError: true); return }
+         if photos.isEmpty { toastManager.show(message: "Please add at least one photo", isError: true); return }
+         guard let userId = authManager.currentUser?.id else { toastManager.show(message: "You must be logged in to add a station.", isError: true); return }
 
          var finalStation = station
          finalStation.addedByUserID = userId
@@ -393,7 +372,7 @@ struct MapView: View {
 
          stationsViewModel.addStation(finalStation, photos: photos) { success, errorMsg in
               if success {
-                  showToastMessage("Station added successfully!", isError: false)
+                  toastManager.show(message: "Station added successfully!", isError: false)
                   showingAddStation = false
                    // Optionally reload stations centered on the newly added one?
                    if let newCoord = finalStation.coordinate {
@@ -402,17 +381,12 @@ struct MapView: View {
                        // position = .region(MKCoordinateRegion(center: newCoord, span: region.span))
                    }
               } else {
-                  showToastMessage(errorMsg ?? "Failed to add station.", isError: true)
+                  toastManager.show(message: errorMsg ?? "Failed to add station.", isError: true)
               }
           }
      }
 
-     private func showToastMessage(_ message: String, isError: Bool) {
-         self.toastMessage = message
-         self.toastIsError = isError
-         withAnimation { self.showToast = true }
-     }
-
+     // Removed unused local helper showToastMessage
 } // End struct MapView
 
 
@@ -421,4 +395,5 @@ struct MapView: View {
 #Preview {
     MapView()
         .environmentObject(AuthManager.shared)
+        .environmentObject(ToastManager.shared)
 }

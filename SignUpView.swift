@@ -3,15 +3,12 @@ import SwiftUI
 struct SignUpView: View {
     @EnvironmentObject var authManager: AuthManager
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject var toastManager: ToastManager // NEW: Inject Toast Manager
     
     @State private var email = ""
     @State private var username = ""
     @State private var password = ""
     @State private var confirmPassword = ""
-    
-    @State private var showingAlert = false
-    @State private var alertTitle = ""
-    @State private var alertMessage = ""
     
     @State private var showTerms = false
     @State private var agreedToTerms = false
@@ -159,26 +156,8 @@ struct SignUpView: View {
             .navigationBarItems(leading: Button("Cancel") {
                 dismiss()
             })
-            .alert(isPresented: $showingAlert) {
-                Alert(
-                    title: Text(alertTitle),
-                    message: Text(alertMessage),
-                    dismissButton: .default(Text("OK"), action: {
-                        if alertTitle == "Success" {
-                            dismiss()
-                        }
-                    })
-                )
-            }
             .sheet(isPresented: $showTerms) {
                 TermsView(isPresented: $showTerms)
-            }
-            .onChange(of: authManager.errorMessage) { oldValue, newValue in
-                if let errorMessage = newValue {
-                    alertTitle = "Error"
-                    alertMessage = errorMessage
-                    showingAlert = true
-                }
             }
         }
     }
@@ -195,13 +174,12 @@ struct SignUpView: View {
     private func signUp() {
         authManager.signUp(email: email, password: password, username: username) { success, message in
             if success {
-                alertTitle = "Success"
-                alertMessage = "Account created! Please check your email to verify your account."
-                showingAlert = true
+                // UPDATED: Use ToastManager for success and dismiss
+                toastManager.show(message: "Account created! Please check your email to verify.", isError: false)
+                dismiss() // Dismiss on success
             } else if let message = message {
-                alertTitle = "Sign Up Error"
-                alertMessage = message
-                showingAlert = true
+                // UPDATED: Use ToastManager for error
+                toastManager.show(message: message, isError: true)
             }
         }
     }
@@ -255,4 +233,5 @@ struct TermsView: View {
     let authManager = AuthManager.shared
     return SignUpView()
         .environmentObject(authManager)
+        .environmentObject(ToastManager.shared) // Inject Toast Manager
 }
